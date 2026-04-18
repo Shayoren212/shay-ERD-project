@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>Ultimate ERD Studio - Shareable Edition</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        :root {
+            --primary: #2c3e50; --accent: #3498db; --entity-bg: #e67e22; 
+            --attr-bg: #3498db; --rel-bg: #27ae60; --danger: #e74c3c;
+        }
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; overflow: hidden; background: #f4f7f6; user-select: none; }
+        #toolbar { height: 70px; background: var(--primary); display: flex; align-items: center; justify-content: space-between; padding: 0 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.2); z-index: 2000; position: relative; }
+        .tool-group { display: flex; align-items: center; gap: 8px; }
+        .tool-btn { padding: 8px 12px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; color: white; font-size: 12px; transition: 0.2s; }
+        .btn-ent { background: var(--entity-bg); } .btn-att { background: var(--attr-bg); } .btn-rel { background: var(--rel-bg); } .btn-line { background: #555; }
+        .btn-clear { background: #95a5a6; } .btn-save { background: #f1c40f; color: #000; } .btn-portfolio { background: #9b59b6; } .btn-share { background: #e91e63; } 
+        .btn-img { background: #1abc9c; font-size: 16px; padding: 6px 10px; }
+        #canvas-container { width: 100vw; height: calc(100vh - 70px); position: relative; overflow: hidden; }
+        #canvas { width: 4000px; height: 4000px; position: absolute; top: 0; left: 0; }
+        .shape { position: absolute; cursor: grab; display: flex; align-items: center; justify-content: center; background: white; border: 2.5px solid #000; box-sizing: border-box; min-width: 80px; min-height: 50px; z-index: 100; }
+        .entity { border-radius: 12px; width: 140px; height: 70px; } .attribute { border-radius: 50%; width: 120px; height: 60px; } .relationship { width: 100px; height: 100px; transform: rotate(45deg); } 
+        .text-node { width: 85%; text-align: center; font-weight: bold; font-size: 14px; white-space: normal; word-wrap: break-word; outline: none; color: #000; cursor: text; }
+        .relationship .text-node { transform: rotate(-45deg); } .pk-underline { text-decoration: underline; }
+        .selected { border: 4px solid var(--accent) !important; z-index: 110; }
+        #selection-marquee { position: absolute; border: 1px dashed var(--accent); background: rgba(52, 152, 219, 0.1); pointer-events: none; z-index: 1500; display: none; }
+        .line-wrapper { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 200; }
+        .svg-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        .actual-line { stroke: #000; stroke-width: 3.5; fill: none; pointer-events: stroke; cursor: grab; }
+        .anchor { width: 14px; height: 14px; background: var(--accent); position: absolute; border-radius: 50%; cursor: crosshair; opacity: 0; transition: 0.2s; pointer-events: auto; z-index: 210; }
+        .line-wrapper:hover .anchor, .anchor.selected { opacity: 1; }
+        .card-box { position: absolute; padding: 2px 5px; border-radius: 3px; font-size: 12px; font-weight: bold; pointer-events: auto; outline: none; min-width: 10px; text-align: center; z-index: 220; background: transparent; }
+        .card-box:not(:empty), .card-box:focus { background: white; border: 1px solid #ccc; }
+        .del-btn { position: absolute; width: 22px; height: 22px; background: var(--danger); color: white; border-radius: 50%; display: none; align-items: center; justify-content: center; cursor: pointer; z-index: 300; }
+        .shape:hover .del-btn, .line-wrapper:hover .del-btn { display: flex; } .shape .del-btn { top: -12px; right: -12px; }
+        #portfolio-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 25px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); z-index: 3000; display: none; width: 320px; }
+    </style>
+</head>
+<body onload="checkURLData()">
+<div id="toolbar">
+    <div class="tool-group">
+        <button class="tool-btn btn-ent" onclick="addShape('entity')">ישות</button>
+        <button class="tool-btn btn-att" onclick="addShape('attribute')">תכונה</button>
+        <button class="tool-btn btn-rel" onclick="addShape('relationship')">קשר</button>
+        <button class="tool-btn btn-line" onclick="addLine()">קו חיבור</button>
+        <button class="tool-btn btn-clear" onclick="confirm('לנקות לוח?') && location.reload()">נקה לוח</button>
+    </div>
+    <div class="tool-group">
+        <button class="tool-btn btn-portfolio" onclick="togglePortfolio()">קיט עבודות</button>
+        <button class="tool-btn btn-save" onclick="saveDiagram()">שמור דיאגרמה</button>
+        <button class="tool-btn btn-share" onclick="generateShareLink()">🔗 יצירת קישור לשיתוף</button>
+        <button class="tool-btn btn-img" title="הורד תמונה" onclick="exportAsImage()">📥</button>
+    </div>
+</div>
+<div id="canvas-container"><div id="canvas"><svg id="svg-layer" class="svg-container"></svg></div><div id="selection-marquee"></div></div>
+<div id="portfolio-modal"><h3>העבודות שלי</h3><ul id="portfolio-list" style="list-style:none; padding:0;"></ul><button onclick="togglePortfolio()" style="width:100%; padding:10px; margin-top:10px;">סגור</button></div>
+<script>
+    const canvas = document.getElementById('canvas'), svgLayer = document.getElementById('svg-layer');
+    let shapesList = [], anchorsList = [], selectedItems = new Set(), isMarquee = false, mStartX, mStartY, draggingElements = null, currentDiagramName = "my_erd";
+    function addShape(type, data = null) {
+        const shape = document.createElement('div'); shape.className = `shape ${type}`;
+        shape.style.left = data ? data.left : '150px'; shape.style.top = data ? data.top : '150px';
+        if(data && data.width) { shape.style.width = data.width; shape.style.height = data.height; }
+        const text = document.createElement('div'); text.className = 'text-node'; text.contentEditable = true;
+        text.innerText = data ? data.text : (type === 'entity' ? 'ישות' : type === 'attribute' ? 'תכונה' : 'קשר');
+        if(data && data.pk) text.classList.add('pk-underline');
+        text.ondblclick = (e) => { if(type === 'attribute') { e.stopPropagation(); text.classList.toggle('pk-underline'); } };
+        const del = document.createElement('div'); del.className = 'del-btn'; del.innerText = '×';
+        del.onclick = (e) => { e.stopPropagation(); shape.remove(); shapesList = shapesList.filter(s => s !== shape); updateAllLines(); };
+        const resize = document.createElement('div'); resize.className = 'resize-handle'; setupResizing(shape, resize);
+        shape.appendChild(text); shape.appendChild(del); shape.appendChild(resize); canvas.appendChild(shape); shapesList.push(shape); setupDragging(shape);
+    }
+    function setupDragging(el) { el.onmousedown = (e) => { if(e.target.contentEditable === "true" || e.target.classList.contains('del-btn') || e.target.classList.contains('resize-handle')) return; e.preventDefault(); e.stopPropagation(); if(!selectedItems.has(el) && !e.shiftKey) { clearSelection(); select(el); } draggingElements = { lastX: e.clientX, lastY: e.clientY }; }; }
+    function setupResizing(el, handle) { handle.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); let startW = el.offsetWidth, startH = el.offsetHeight, sx = e.clientX, sy = e.clientY; const onMove = (me) => { let nw = startW + (me.clientX - sx), nh = startH + (me.clientY - sy); if(el.classList.contains('relationship')) nw = nh = Math.max(nw, nh); el.style.width = Math.max(50, nw) + 'px'; el.style.height = Math.max(40, nh) + 'px'; updateAllLines(); }; window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', () => window.removeEventListener('mousemove', onMove), {once:true}); }; }
+    window.addEventListener('mousemove', (e) => { if(draggingElements) { const dx = e.clientX - draggingElements.lastX, dy = e.clientY - draggingElements.lastY; selectedItems.forEach(item => { item.style.left = (parseInt(item.style.left) + dx) + 'px'; item.style.top = (parseInt(item.style.top) + dy) + 'px'; }); draggingElements.lastX = e.clientX; draggingElements.lastY = e.clientY; updateAllLines(); } if(isMarquee) updateMarquee(e); });
+    window.addEventListener('mouseup', () => { draggingElements = isMarquee = false; document.getElementById('selection-marquee').style.display = 'none'; });
+    function addLine(data = null) {
+        const wrapper = document.createElement('div'); wrapper.className = 'line-wrapper';
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "line"); path.setAttribute('class', 'actual-line'); svgLayer.appendChild(path);
+        const a1 = createAnchor(data ? data.x1 : 200, data ? data.y1 : 200), a2 = createAnchor(data ? data.x2 : 400, data ? data.y2 : 200);
+        const card = document.createElement('div'); card.className = 'card-box'; card.contentEditable = true; card.innerText = data ? data.card : '';
+        const del = document.createElement('div'); del.className = 'del-btn'; del.innerText = '×';
+        del.onclick = () => { path.remove(); a1.remove(); a2.remove(); card.remove(); wrapper.remove(); anchorsList = anchorsList.filter(a => a !== a1 && a !== a2); };
+        const update = () => { const x1 = parseInt(a1.style.left) + 7, y1 = parseInt(a1.style.top) + 7, x2 = parseInt(a2.style.left) + 7, y2 = parseInt(a2.style.top) + 7; path.setAttribute('x1', x1); path.setAttribute('y1', y1); path.setAttribute('x2', x2); path.setAttribute('y2', y2); card.style.left = ((x1+x2)/2 - card.offsetWidth/2) + 'px'; card.style.top = ((y1+y2)/2 - 12) + 'px'; del.style.left = ((x1+x2)/2 + 25) + 'px'; del.style.top = ((y1+y2)/2 - 30) + 'px'; };
+        path.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); let lx = e.clientX, ly = e.clientY; const onMove = (me) => { const dx = me.clientX - lx, dy = me.clientY - ly; a1.style.left = (parseInt(a1.style.left) + dx) + 'px'; a1.style.top = (parseInt(a1.style.top) + dy) + 'px'; a2.style.left = (parseInt(a2.style.left) + dx) + 'px'; a2.style.top = (parseInt(a2.style.top) + dy) + 'px'; lx = me.clientX; ly = me.clientY; update(); }; window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', () => window.removeEventListener('mousemove', onMove), {once:true}); };
+        a1.onDrag = a2.onDrag = update; wrapper.appendChild(a1); wrapper.appendChild(a2); wrapper.appendChild(card); wrapper.appendChild(del); canvas.appendChild(wrapper); anchorsList.push(a1, a2); update();
+    }
+    function createAnchor(x, y) { const a = document.createElement('div'); a.className = 'anchor'; a.style.left = x + 'px'; a.style.top = y + 'px'; a.onmousedown = (e) => { e.preventDefault(); e.stopPropagation(); const rect = canvas.getBoundingClientRect(); const onMove = (me) => { a.style.left = (me.clientX - rect.left - 7) + 'px'; a.style.top = (me.clientY - rect.top - 7) + 'px'; if(a.onDrag) a.onDrag(); }; window.addEventListener('mousemove', onMove); window.addEventListener('mouseup', () => window.removeEventListener('mousemove', onMove), {once:true}); }; return a; }
+    function updateAllLines() { document.querySelectorAll('.anchor').forEach(a => a.onDrag && a.onDrag()); }
+    function generateShareLink() { const data = { shapes: shapesList.map(s => ({ type: s.classList[1], left: s.style.left, top: s.style.top, width: s.style.width, height: s.style.height, text: s.querySelector('.text-node').innerText, pk: s.querySelector('.text-node').classList.contains('pk-underline') })), lines: Array.from(document.querySelectorAll('.line-wrapper')).map(w => { const as = w.querySelectorAll('.anchor'); return { x1: parseInt(as[0].style.left), y1: parseInt(as[0].style.top), x2: parseInt(as[1].style.left), y2: parseInt(as[1].style.top), card: w.querySelector('.card-box').innerText }; }) }; const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(data)))); const url = window.location.origin + window.location.pathname + "?data=" + encoded; navigator.clipboard.writeText(url).then(() => alert("הקישור הועתק! שלחי אותו ליעל.")); }
+    function checkURLData() { const params = new URLSearchParams(window.location.search); const dataParam = params.get('data'); if (dataParam) { try { const data = JSON.parse(decodeURIComponent(escape(atob(dataParam)))); data.shapes.forEach(s => addShape(s.type, s)); data.lines.forEach(l => addLine(l)); } catch (e) { console.error("שגיאה בטעינה"); } } }
+    function saveDiagram() { const name = prompt("שם הדיאגרמה:"); if(!name) return; const db = JSON.parse(localStorage.getItem('erd_final_v3') || '{}'); db[name] = { shapes: shapesList.map(s => ({ type: s.classList[1], left: s.style.left, top: s.style.top, width: s.style.width, height: s.style.height, text: s.querySelector('.text-node').innerText, pk: s.querySelector('.text-node').classList.contains('pk-underline') })), lines: Array.from(document.querySelectorAll('.line-wrapper')).map(w => { const as = w.querySelectorAll('.anchor'); return { x1: parseInt(as[0].style.left), y1: parseInt(as[0].style.top), x2: parseInt(as[1].style.left), y2: parseInt(as[1].style.top), card: w.querySelector('.card-box').innerText }; }) }; localStorage.setItem('erd_final_v3', JSON.stringify(db)); alert("נשמר!"); }
+    function togglePortfolio() { const m = document.getElementById('portfolio-modal'), l = document.getElementById('portfolio-list'); l.innerHTML = ''; const db = JSON.parse(localStorage.getItem('erd_final_v3') || '{}'); Object.keys(db).forEach(k => { const li = document.createElement('li'); li.style="display:flex; justify-content:space-between; cursor:pointer; padding:8px; border-bottom:1px solid #eee;"; li.innerHTML = `<span>📂 ${k}</span> <button onclick="event.stopPropagation(); deleteItem('${k}')" style="background:red; color:white; border:none; padding:4px 8px; border-radius:4px;">מחק</button>`; li.onclick = () => { currentDiagramName = k; loadFromData(db[k]); togglePortfolio(); }; l.appendChild(li); }); m.style.display = m.style.display === 'block' ? 'none' : 'block'; }
+    function loadFromData(data) { canvas.querySelectorAll('.shape, .line-wrapper').forEach(n => n.remove()); svgLayer.innerHTML = ''; shapesList = []; anchorsList = []; data.shapes.forEach(s => addShape(s.type, s)); data.lines.forEach(l => addLine(l)); }
+    function deleteItem(k) { const db = JSON.parse(localStorage.getItem('erd_final_v3')); delete db[k]; localStorage.setItem('erd_final_v3', JSON.stringify(db)); togglePortfolio(); }
+    function exportAsImage() { html2canvas(document.getElementById('canvas-container')).then(c => { const a = document.createElement('a'); a.download = currentDiagramName + '.png'; a.href = c.toDataURL(); a.click(); }); }
+    function select(el) { el.classList.add('selected'); selectedItems.add(el); }
+    function deselect(el) { el.classList.remove('selected'); selectedItems.delete(el); }
+    function clearSelection() { selectedItems.forEach(deselect); selectedItems.clear(); }
+    document.getElementById('canvas-container').onmousedown = (e) => { if(e.target.id === 'canvas-container' || e.target.id === 'canvas') { isMarquee = true; mStartX = e.clientX; mStartY = e.clientY; clearSelection(); } };
+    function updateMarquee(e) { const m = document.getElementById('selection-marquee'); const left = Math.min(mStartX, e.clientX), top = Math.min(mStartY, e.clientY), width = Math.abs(mStartX - e.clientX), height = Math.abs(mStartY - e.clientY); m.style = `left:${left}px; top:${top-70}px; width:${width}px; height:${height}px; display:block;`; shapesList.forEach(s => { const r = s.getBoundingClientRect(); if(r.left > left && r.right < left + width && r.top > top && r.bottom < top + height) select(s); else if(!e.shiftKey) deselect(s); }); anchorsList.forEach(a => { const r = a.getBoundingClientRect(); if(r.left > left && r.right < left + width && r.top > top && r.bottom < top + height) select(a); else if(!e.shiftKey) deselect(a); }); }
+</script>
+</body>
+</html>
